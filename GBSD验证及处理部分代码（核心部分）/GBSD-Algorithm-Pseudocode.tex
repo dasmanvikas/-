@@ -1,0 +1,53 @@
+\documentclass[UTF8]{ctexart}
+\usepackage{amsmath, amssymb}
+\usepackage{algorithm}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+
+\begin{document}
+	
+	\begin{algorithm}[t]
+		\caption{谱特征粒球检测方法GBSD}
+		\label{alg:gb-ssd-da}
+		\textbf{输入:} 数据集 $\mathcal{D} = \{(\mathbf{x}_i, y_i, t_i)\}_{i=1}^N$，目标类 $y_{t}$，粒球数 $K$，阈值 $\tau$，近邻数 $k_n$，特征权重 $\mathbf{w} = [w_r, w_d, w_b]^\top$。\
+		\begin{algorithmic}[1]
+			\Statex \textbf{步骤1: 数据准备}
+			\State $\mathbf{X} \gets \{\mathbf{x}_i | y_i = y_t\}$ \Comment{提取目标类样本}
+			\State $\mathbf{F}, \mathbf{b} \gets \text{ExtractFeatures}(\mathbf{X})$ \Comment{提取特征，$\mathbf{b}$为任务特定特征}
+			
+			\Statex \textbf{步骤2: 计算谱特征与样本异常分数}
+			\State $\tilde{\mathbf{F}} \gets \text{StandardScaler}(\mathbf{F})$ \Comment{特征标准化}
+			\State $\mathbf{U}, \mathbf{Z} \gets \text{PCA}(\tilde{\mathbf{F}}, n_c=10)$ \Comment{PCA降维，获低维表示$\mathbf{Z}$}
+			\State $\mathbf{e} \gets \|\tilde{\mathbf{F}} - \mathbf{U}\mathbf{Z}^\top\|_2^2$ \Comment{计算PCA重构误差（谱特征）}
+			\State $\mathbf{d} \gets \text{KNN-Density}(\mathbf{Z}, k=\min(15, N_t-1))$ \Comment{计算KNN局部密度特征}
+			\State $\tilde{\mathbf{e}}, \tilde{\mathbf{d}}, \tilde{\mathbf{b}} \gets \text{MinMaxNorm}(\mathbf{e}, \mathbf{d}, \mathbf{b})$ \Comment{特征归一化}
+			\State $\mathbf{s} \gets w_r\tilde{\mathbf{e}} + w_d\tilde{\mathbf{d}} + w_b\tilde{\mathbf{b}}$ \Comment{加权融合得到样本异常分数}
+			
+			\Statex \textbf{步骤3: 粒球生成与清洁区域识别}
+			\State $\{\mathcal{C}_k\}_{k=1}^K, \mathbf{c}_k \gets \text{K-Means}(\mathbf{Z}, K)$ \Comment{K-Means聚类生成$K$个粒球}
+			\For{$k = 1$ \textbf{to} $K$}
+			\State $\delta_k \gets \|\mathbf{Z}[\mathcal{C}_k] - \mathbf{c}_k\|_2$ \Comment{计算粒球$k$内样本到中心的距离}
+			\State $\gamma_k = \beta \cdot \text{Norm}\frac{\operatorname{mean}(\delta_k)}{\operatorname{std}(\delta_k)} + (1 - \beta) \cdot \text{Norm}\left( \text{std}(\mathbf{s}^{(k)}) \right) $ \Comment{污染度}
+			\EndFor
+			\State $\tilde{\boldsymbol{\gamma}} \gets \text{MinMaxNorm}(\boldsymbol{\gamma})$ \Comment{污染度归一化}
+			\State $\mathcal{I}_{clean} \gets \bigcup_{k:\tilde{\gamma}_k < \tau} \mathcal{C}_k$ \Comment{污染度低于阈值$\tau$的粒球为清洁粒球}
+			
+			\Statex \textbf{步骤4: 基于清洁粒球的分数传播}
+			\If{$|\mathcal{I}_{clean}| > 0$}
+			\For{$i = 1$ \textbf{to} $N_t$}
+			\State $\mathcal{N}_i, \boldsymbol{\delta}_i \gets k_n\text{-NN}(\mathbf{z}_i, \mathbf{Z}[\mathcal{I}_{clean}])$ \Comment{在清洁样本集中找$k_n$个近邻}
+			\State $\boldsymbol{\alpha}_i \gets 1 / (\boldsymbol{\delta}_i + \epsilon)$ \Comment{计算距离权重（距离越近权重越大）}
+			\State $s^f_i \gets \frac{\sum_{j \in \mathcal{N}_i} \alpha_{i,j} s_j}{\sum_{j \in \mathcal{N}_i} \alpha_{i,j}}$ \Comment{加权传播得到最终异常分数}
+			\EndFor
+			\Else
+			\State $\mathbf{s}^f \gets \mathbf{s}$ \Comment{若无清洁粒球，则使用初步分数}
+			\EndIf
+			
+			\Statex \textbf{步骤5: 自适应阈值与输出}
+			\State $\theta^* \gets \arg\max_{\theta} \text{F1}(\mathbb{I}[\mathbf{s}^f \geq \theta], \mathbf{t}_{tar})$ \Comment{网格搜索最大化F1的阈值}
+			\State $\hat{\mathbf{p}} \gets \mathbb{I}[\mathbf{s}^f \geq \theta^*]$ \Comment{得到最终预测（0:干净, 1:污染）}
+			\State \Return $\hat{\mathbf{p}}, \mathbf{s}^f$ \Comment{返回预测标签、异常分数}
+		\end{algorithmic}
+	\end{algorithm}
+	
+\end{document}
